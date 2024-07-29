@@ -33,6 +33,9 @@
             description: 'token to push'
             required: true
     
+    permissions:  # added using https://github.com/step-security/secure-repo
+      contents: read
+
     jobs:
       build-image:
         name: Build Images
@@ -73,4 +76,13 @@
                 push: ${{ inputs.docker_push }}
                 tags: ${{ steps.meta.outputs.tags }}
                 build-args: ${{ inputs.docker_build_args }}
-              
+
+            - name: Docker Push Summary
+              uses: 'LouisBrunner/checks-action@6b626ffbad7cc56fd58627f774b9067e6118af23' #v1.6.1
+              if: always()
+              with:
+                token: ${{ secrets.GITHUB_TOKEN }}
+                name: "image / pushed"
+                conclusion: ${{ job.status }}
+                output: |
+                  {"summary":"${{ fromJson(steps.meta.outputs.json).tags[0] }}"} 
