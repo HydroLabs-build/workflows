@@ -1,0 +1,92 @@
+---
+    name: docker-build-push
+    
+    on:
+      workflow_call:
+        inputs:
+            image_repository:
+              required: true
+              type: string
+            dockerfile_path:
+              required: false
+              type: string
+              default: 'Dockerfile'
+            docker_context:
+              required: false
+              type: string
+              default: '.'
+            docker_provenance:
+              description: 'The provenance attestations include facts about the build process.'
+              required: false
+              type: boolean
+              default: false
+            docker_build_args:
+              required: false
+              type: string
+            docker_push:
+              description: 'Will automatically push the build result to registry.'
+              required: false
+              type: boolean
+              default: true
+        secrets:
+          DIGITALOCEAN_ACCESS_TOKEN:
+            description: 'token to push'
+            required: true
+    
+    permissions:  # added using https://github.com/step-security/secure-repo
+      contents: read
+
+    jobs:
+      build-image:
+        name: Build Images
+        runs-on: ["self-hosted"]
+        permissions:
+          contents: 'read'
+          id-token: 'write'
+          checks: 'write'
+    
+        steps:
+    
+            - name: Checkout git repo
+              uses: actions/checkout@v4
+            
+            - name: Install doctl
+              uses: digitalocean/action-doctl@v2
+              with:
+                  token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+            - name: Log in to DigitalOcean Container Registry with short-lived credentials
+              run: doctl registry login --expiry-seconds 1200
+          
+            - id: 'meta'
+              name: 'Docker Meta'
+              uses: 'docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81' #v4.1.1
+              env:
+                DOCKER_METADATA_PR_HEAD_SHA: 'true'
+              with:
+                images: ${{ inputs.image_repository }}
+                tags: |
+                  type=ref,suffix=-{{sha}},event=branch
+                  type=ref,suffix=-{{sha}},event=pr
+                  type=ref,suffix=-{{sha}},event=tag
+                  type=semver,event=tag,pattern={{raw}}
+        
+            - name: 'Build and Push Container Images'
+              id: 'build-and-push'
+              uses: 'docker/build-push-action@4a13e500e55cf31b7a5d59a38ab2040ab0f42f56' #v3.2.0
+              with:
+                context: ${{ inputs.docker_context }}
+                file: ${{ inputs.dockerfile_path }}
+                push: ${{ inputs.docker_push }}
+                tags: ${{ steps.meta.outputs.tags }}
+                build-args: ${{ inputs.docker_build_args }}
+
+            - name: Docker Push Summary
+              uses: 'LouisBrunner/checks-action@6b626ffbad7cc56fd58627f774b9067e6118af23' #v1.6.1
+              if: always()
+              with:
+                token: ${{ secrets.GITHUB_TOKEN }}
+                name: "image / pushed"
+                conclusion: ${{ job.status }}
+                output: |
+                  {"summary":"${{ fromJson(steps.meta.outputs.json).tags[0] }}"} 
